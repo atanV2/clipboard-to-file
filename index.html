@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>クリップボード → ファイル</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px 30px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .filename-display {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            display: none;
+        }
+
+        .filename-display.show {
+            display: block;
+        }
+
+        .filename-display strong {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 30px 20px;
+            }
+
+            h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 クリップボード → ファイル</h1>
+        <p class="subtitle">アーティファクトをコピーしてタップ</p>
+
+        <button class="btn" id="downloadBtn">
+            📥 ダウンロード
+        </button>
+
+        <div class="filename-display" id="filenameDisplay"></div>
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        const downloadBtn = document.getElementById('downloadBtn');
+        const filenameDisplay = document.getElementById('filenameDisplay');
+        const status = document.getElementById('status');
+
+        // ステータス表示
+        function showStatus(message, isError = false) {
+            status.textContent = message;
+            status.className = 'status ' + (isError ? 'error' : 'success');
+            setTimeout(() => {
+                status.className = 'status';
+                filenameDisplay.classList.remove('show');
+            }, 3000);
+        }
+
+        // 最初の見出しを抽出してファイル名を生成
+        function extractFilenameFromContent(text) {
+            const lines = text.split('\n');
+            
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine.startsWith('#')) {
+                    // #を削除してトリム
+                    let heading = trimmedLine.replace(/^#+\s*/, '').trim();
+                    
+                    // ファイル名として使えない文字を置換
+                    heading = heading
+                        .replace(/[<>:"/\\|?*]/g, '-')  // 禁止文字を-に
+                        .replace(/\s+/g, '_')            // スペースを_に
+                        .replace(/-+/g, '-')             // 連続する-を1つに
+                        .replace(/_+/g, '_')             // 連続する_を1つに
+                        .substring(0, 100);              // 最大100文字
+                    
+                    if (heading) {
+                        return heading + '.md';
+                    }
+                }
+            }
+            
+            // 見出しが見つからない場合はデフォルト名
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hour = String(now.getHours()).padStart(2, '0');
+            const minute = String(now.getMinutes()).padStart(2, '0');
+            return `artifact_${year}${month}${day}_${hour}${minute}.md`;
+        }
+
+        // ファイルダウンロード
+        function downloadFile(content, filename) {
+            const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // メイン処理
+        async function processClipboard() {
+            try {
+                const clipboardText = await navigator.clipboard.readText();
+                
+                if (!clipboardText || clipboardText.trim() === '') {
+                    showStatus('クリップボードが空です', true);
+                    return;
+                }
+
+                // ファイル名を生成
+                const filename = extractFilenameFromContent(clipboardText);
+                
+                // ファイル名を表示
+                filenameDisplay.innerHTML = `保存: <strong>${filename}</strong>`;
+                filenameDisplay.classList.add('show');
+
+                // ダウンロード
+                downloadFile(clipboardText, filename);
+                showStatus('✓ ダウンロードしました');
+
+            } catch (err) {
+                console.error('エラー:', err);
+                showStatus('クリップボードへのアクセスが拒否されました', true);
+            }
+        }
+
+        // イベントリスナー
+        downloadBtn.addEventListener('click', processClipboard);
+    </script>
+</body>
+</html>
